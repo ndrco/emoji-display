@@ -1,0 +1,20 @@
+[Unit]
+Description=Emoji Display Arduino bridge
+Documentation=https://github.com/NDRCo/emoji-display
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=emoji-display
+WorkingDirectory=/opt/emoji-display
+EnvironmentFile=-/etc/emoji-display/emoji-display.env
+ExecStart=/opt/emoji-display/.venv/bin/emoji-displayd --driver serial
+Restart=on-failure
+RestartSec=3
+SupplementaryGroups=dialout
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

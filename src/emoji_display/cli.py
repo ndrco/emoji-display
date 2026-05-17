@@ -8,6 +8,8 @@ import urllib.parse
 import urllib.request
 from typing import Any
 
+from .emoji import normalize_emoji, supported_catalog
+
 DEFAULT_URL = "http://127.0.0.1:18791"
 
 
@@ -18,18 +20,23 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
 
     sub.add_parser("status")
+    sub.add_parser("supported")
+
+    normalize = sub.add_parser("normalize")
+    normalize.add_argument("symbol")
+    normalize.add_argument("--name", default=None)
 
     show = sub.add_parser("show")
     show.add_argument("symbol")
     show.add_argument("--name", default=None)
-    show.add_argument("--hold-ms", type=int, default=1200)
+    show.add_argument("--hold-ms", type=int, default=None)
     show.add_argument("--mode", choices=["replace", "queue"], default="replace")
     show.add_argument("--source", default="displayctl")
     show.add_argument("--id", default=None)
 
     sequence = sub.add_parser("sequence")
     sequence.add_argument("symbols", nargs="+")
-    sequence.add_argument("--hold-ms", type=int, default=1200)
+    sequence.add_argument("--hold-ms", type=int, default=None)
     sequence.add_argument("--mode", choices=["replace", "queue"], default="queue")
     sequence.add_argument("--source", default="displayctl")
     sequence.add_argument("--id", default=None)
@@ -45,29 +52,48 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "status":
             payload = _get_json(args.url, "/v1/status", token=args.token)
+        elif args.command == "supported":
+            try:
+                payload = _get_json(args.url, "/v1/supported", token=args.token)
+            except RuntimeError as exc:
+                if str(exc).startswith("HTTP "):
+                    raise
+                payload = {"ok": True, "items": supported_catalog(), "source": "local"}
+        elif args.command == "normalize":
+            match = normalize_emoji(args.symbol, args.name)
+            payload = {
+                "ok": True,
+                "requested": match.requested,
+                "display_name": match.display_name,
+                "display_symbol": match.display_symbol,
+                "matched_by": match.matched_by,
+            }
         elif args.command == "show":
+            show_payload = {
+                "symbol": args.symbol,
+                "name": args.name,
+                "mode": args.mode,
+                "source": args.source,
+                "id": args.id,
+            }
+            if args.hold_ms is not None:
+                show_payload["hold_ms"] = args.hold_ms
             payload = _post_json(
                 args.url,
                 "/v1/show",
-                {
-                    "symbol": args.symbol,
-                    "name": args.name,
-                    "hold_ms": args.hold_ms,
-                    "mode": args.mode,
-                    "source": args.source,
-                    "id": args.id,
-                },
+                show_payload,
                 token=args.token,
             )
         elif args.command == "sequence":
+            items = [{"symbol": symbol} for symbol in args.symbols]
+            if args.hold_ms is not None:
+                for item in items:
+                    item["hold_ms"] = args.hold_ms
             payload = _post_json(
                 args.url,
                 "/v1/sequence",
                 {
-                    "items": [
-                        {"symbol": symbol, "hold_ms": args.hold_ms}
-                        for symbol in args.symbols
-                    ],
+                    "items": items,
                     "mode": args.mode,
                     "source": args.source,
                     "id": args.id,

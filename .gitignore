@@ -1,7 +1,10 @@
 .pytest_cache/
 __pycache__/
 *.py[cod]
+*.bak
 .venv/
+.env
+*.log
 dist/
 build/
 *.egg-info/

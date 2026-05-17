@@ -35,9 +35,15 @@ def test_show_updates_state_and_driver():
         }
     )
 
-    assert response == {"ok": True, "current": "🙂"}
-    assert driver.shown == [DisplayItem("🙂", "slightly_smiling_face", 900)]
+    assert response == {
+        "ok": True,
+        "current": "🙂",
+        "display_name": "HAPPY",
+        "display_symbol": "🙂",
+    }
+    assert driver.shown == [DisplayItem("🙂", "slightly_smiling_face", 900, "HAPPY", "🙂")]
     assert app.status()["current"] == "🙂"
+    assert app.status()["display_name"] == "HAPPY"
     assert app.status()["last_source"] == "listener"
 
 
@@ -54,9 +60,16 @@ def test_sequence_accepts_items_and_clear_resets_state():
     )
     clear_response = app.clear({"source": "test", "reason": "interrupt"})
 
-    assert response == {"ok": True, "current": "✨", "accepted": 2}
+    assert response == {
+        "ok": True,
+        "current": "✨",
+        "display_name": "STAR",
+        "display_symbol": "🌟",
+        "accepted": 2,
+    }
     assert clear_response == {"ok": True}
     assert [item.symbol for item in driver.shown] == ["🙂", "✨"]
+    assert [item.display_name for item in driver.shown] == ["HAPPY", "STAR"]
     assert driver.cleared == 1
     assert app.status()["current"] is None
     assert app.status()["last_reason"] == "interrupt"
