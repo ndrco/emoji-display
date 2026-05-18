@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import time
 from dataclasses import dataclass
 from typing import Any, Callable, Protocol
@@ -8,6 +9,22 @@ from typing import Any, Callable, Protocol
 from .emoji import normalize_emoji
 
 log = logging.getLogger(__name__)
+
+_AUTO_DETECT_BANNER_MARKERS = (
+    "MAX7219 8x8 Emoji Panel ready.",
+    "Available EMO names:",
+    "Commands:",
+)
+_ARDUINO_USB_IDS = {
+    (0x2341, 0x8037),  # Arduino Micro
+    (0x2341, 0x8036),  # Leonardo
+    (0x2341, 0x0037),  # older Arduino Micro VID/PID pair
+    (0x2341, 0x0036),  # older Leonardo VID/PID pair
+    (0x2A03, 0x8037),  # Arduino.org Micro
+    (0x2A03, 0x8036),  # Arduino.org Leonardo
+    (0x1B4F, 0x9205),  # SparkFun Pro Micro 5V
+    (0x1B4F, 0x9203),  # SparkFun Pro Micro 3.3V
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -171,10 +188,26 @@ class SerialDisplayDriver:
 
         try:
             factory = self._serial_factory or _pyserial_factory()
-            resolved_port = auto_detect_serial_port() if self.port == "auto" else self.port
+            resolved_port = (
+                auto_detect_serial_port(
+                    serial_factory=factory,
+                    baudrate=self.baudrate,
+                    timeout=self.timeout,
+                    write_timeout=self.write_timeout,
+                    reset_wait=self.reset_wait,
+                    ack_timeout=self.ack_timeout,
+                )
+                if self.port == "auto"
+                else self.port
+            )
             if not resolved_port:
                 raise SerialDisplayError("serial port is not configured")
 
+            log.info(
+                "opening serial display port %s (%s)",
+                resolved_port,
+                "auto-detected" if self.port == "auto" else "configured",
+            )
             self._serial = factory(
                 port=resolved_port,
                 baudrate=self.baudrate,
@@ -239,7 +272,15 @@ def _pyserial_factory() -> Callable[..., Any]:
     return serial.Serial
 
 
-def auto_detect_serial_port() -> str:
+def auto_detect_serial_port(
+    *,
+    serial_factory: Callable[..., Any] | None = None,
+    baudrate: int = 115200,
+    timeout: float = 0.25,
+    write_timeout: float = 1.0,
+    reset_wait: float = 2.0,
+    ack_timeout: float = 1.0,
+) -> str:
     try:
         from serial.tools import list_ports
     except ImportError as exc:
@@ -249,26 +290,143 @@ def auto_detect_serial_port() -> str:
     if not ports:
         raise SerialDisplayError("no serial ports found; set EMOJI_DISPLAY_PORT or --serial-port")
 
-    preferred: list[str] = []
+    scored_candidates: list[tuple[int, str]] = []
     for port in ports:
         device = str(getattr(port, "device", "") or "")
-        text = " ".join(
-            str(getattr(port, attr, "") or "")
-            for attr in ("device", "description", "manufacturer", "product", "hwid")
-        ).casefold()
-        if any(
-            marker in text
-            for marker in ("arduino", "promicro", "pro micro", "usb serial", "usbmodem", "usbserial", "ch340")
-        ):
-            preferred.append(device)
-        elif any(marker in device for marker in ("/dev/ttyACM", "/dev/ttyUSB", "/dev/cu.usb", "COM")):
-            preferred.append(device)
+        score = _serial_port_score(port)
+        if score > 0:
+            scored_candidates.append((score, device))
 
-    candidates = preferred or [str(getattr(port, "device", "") or "") for port in ports]
+    candidates = [device for _, device in scored_candidates] or [str(getattr(port, "device", "") or "") for port in ports]
     candidates = [candidate for candidate in dict.fromkeys(candidates) if candidate]
     if len(candidates) == 1:
         return candidates[0]
 
+    scored_candidates.sort(key=lambda item: (-item[0], item[1]))
+    if scored_candidates:
+        best_score, best_device = scored_candidates[0]
+        best_devices = [device for score, device in scored_candidates if score == best_score]
+        if len(best_devices) == 1:
+            return best_device
+
+    factory = serial_factory or _pyserial_factory()
+    probed = _probe_serial_candidates(
+        candidates,
+        serial_factory=factory,
+        baudrate=baudrate,
+        timeout=timeout,
+        write_timeout=write_timeout,
+        reset_wait=reset_wait,
+        ack_timeout=ack_timeout,
+    )
+    if len(probed) == 1:
+        return probed[0]
+    if len(probed) > 1:
+        raise SerialDisplayError(
+            "multiple Arduino-like serial ports responded; choose one with --serial-port: " + ", ".join(probed)
+        )
+
     raise SerialDisplayError(
         "multiple serial ports found; choose one with --serial-port: " + ", ".join(candidates)
     )
+
+
+def _serial_port_score(port: Any) -> int:
+    device = str(getattr(port, "device", "") or "")
+    text = " ".join(
+        str(getattr(port, attr, "") or "")
+        for attr in ("device", "description", "manufacturer", "product", "interface", "hwid")
+    ).casefold()
+    vid = getattr(port, "vid", None)
+    pid = getattr(port, "pid", None)
+
+    score = 0
+    if (vid, pid) in _ARDUINO_USB_IDS:
+        score += 100
+    if any(marker in text for marker in ("arduino", "promicro", "pro micro", "leonardo", "arduino micro")):
+        score += 80
+    if any(marker in device for marker in ("/dev/ttyACM", "/dev/cu.usbmodem")):
+        score += 30
+    if any(marker in text for marker in ("ch340", "wch usb serial", "usb serial", "usbmodem", "usbserial")):
+        score += 15
+    if any(marker in device for marker in ("/dev/ttyUSB", "/dev/cu.usbserial", "COM")):
+        score += 10
+    if device and os.path.exists(device):
+        score += 1
+    return score
+
+
+def _probe_serial_candidates(
+    candidates: list[str],
+    *,
+    serial_factory: Callable[..., Any],
+    baudrate: int,
+    timeout: float,
+    write_timeout: float,
+    reset_wait: float,
+    ack_timeout: float,
+) -> list[str]:
+    matched: list[str] = []
+    for candidate in candidates:
+        if _serial_port_looks_like_panel(
+            candidate,
+            serial_factory=serial_factory,
+            baudrate=baudrate,
+            timeout=timeout,
+            write_timeout=write_timeout,
+            reset_wait=reset_wait,
+            ack_timeout=ack_timeout,
+        ):
+            matched.append(candidate)
+    return matched
+
+
+def _serial_port_looks_like_panel(
+    device: str,
+    *,
+    serial_factory: Callable[..., Any],
+    baudrate: int,
+    timeout: float,
+    write_timeout: float,
+    reset_wait: float,
+    ack_timeout: float,
+) -> bool:
+    ser: Any | None = None
+    try:
+        ser = serial_factory(
+            port=device,
+            baudrate=baudrate,
+            timeout=timeout,
+            write_timeout=write_timeout,
+        )
+        reset_input_buffer = getattr(ser, "reset_input_buffer", None)
+        if callable(reset_input_buffer):
+            reset_input_buffer()
+        if reset_wait:
+            time.sleep(reset_wait)
+
+        deadline = time.monotonic() + max(ack_timeout, timeout, 0.5)
+        seen: list[str] = []
+        while time.monotonic() < deadline:
+            raw = ser.readline()
+            if not raw:
+                continue
+            line = raw.decode("utf-8", errors="replace").strip()
+            if not line:
+                continue
+            seen.append(line)
+            if any(marker in line for marker in _AUTO_DETECT_BANNER_MARKERS):
+                log.debug("auto-detect matched %s via banner: %s", device, line)
+                return True
+        if seen:
+            log.debug("auto-detect probe for %s saw unrelated serial lines: %s", device, seen[-3:])
+        return False
+    except Exception as exc:  # noqa: BLE001 - probing should be best-effort only
+        log.debug("auto-detect probe failed for %s: %s", device, exc)
+        return False
+    finally:
+        if ser is not None:
+            try:
+                ser.close()
+            except Exception:  # noqa: BLE001 - best-effort close after probe
+                pass

@@ -83,6 +83,9 @@ If only one Arduino-like serial device is connected, the daemon can auto-detect:
 emoji-displayd --driver serial
 ```
 
+When the serial driver opens the device it logs the resolved port name, for
+example `opening serial display port /dev/ttyACM0 (auto-detected)`.
+
 Useful environment variables are listed in [`.env.example`](.env.example).
 
 ## CLI
@@ -183,7 +186,7 @@ The unit template assumes the repository is installed in `/opt/emoji-display`.
 sudo useradd --system --home-dir /opt/emoji-display \
   --shell /usr/sbin/nologin --groups dialout emoji-display
 sudo mkdir -p /etc/emoji-display
-sudo git clone https://github.com/NDRCo/emoji-display.git /opt/emoji-display
+sudo git clone https://github.com/ndrco/emoji-display.git /opt/emoji-display
 sudo python3 -m venv /opt/emoji-display/.venv
 sudo /opt/emoji-display/.venv/bin/pip install -e /opt/emoji-display
 sudo cp packaging/systemd/emoji-display.env.example /etc/emoji-display/emoji-display.env
@@ -195,9 +198,11 @@ sudo journalctl -u emoji-display -f
 ```
 
 Set `EMOJI_DISPLAY_PORT=/dev/ttyACM0` or the correct device in
-`/etc/emoji-display/emoji-display.env`. On some distributions the serial group
-is `uucp` or `lock` instead of `dialout`; update the service/user group if
-needed.
+`/etc/emoji-display/emoji-display.env` if you want to pin one exact port. Leave
+`EMOJI_DISPLAY_PORT` unset to use auto-detection, then watch
+`journalctl -u emoji-display -f` for the resolved port name. On some
+distributions the serial group is `uucp` or `lock` instead of `dialout`;
+update the service/user group if needed.
 
 ## Development
 
