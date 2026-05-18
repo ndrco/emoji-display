@@ -4,6 +4,10 @@ Firmware for an Arduino-compatible board connected to one MAX7219 8x8 LED
 matrix. The Python daemon sends normalized emoji names over Serial, and this
 sketch renders the matching built-in animation.
 
+After flashing the board, return to the repository root
+[`README.md`](../../README.md) for daemon installation, service setup, and
+verification steps.
+
 ## Components
 
 - Arduino Pro Micro / Leonardo-compatible ATmega32U4 board, 5 V version.
