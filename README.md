@@ -31,12 +31,15 @@ The Arduino panel currently contains these display names:
 ```text
 HAPPY LAUGH WINK SURPRISE SAD CRY ANGRY LOVE KISS COOL SLEEP NEUTRAL
 CONFUSED THINK TONGUE DEAD WOW HEART YES NO OK ALERT MUSIC ROBOT GHOST
-CAT DOG FOOD STAR
+CAT DOG FOOD STAR CAR FLOWER RAIN DEFAULT
 ```
 
-Unknown emoji fall back to `NEUTRAL`. To add a new hardware icon, add the 8x8
-frames to `Arduino/max7219_emoji_panel/emojis.h`, then add normalization rules
-in [`src/emoji_display/emoji.py`](src/emoji_display/emoji.py).
+Emoji that do not have an exact hardware drawing are classified by domain when
+possible: transport maps to `CAR`, plants to `FLOWER`, weather to `RAIN`, food
+to `FOOD`, music to `MUSIC`, and fireworks or sparkles to `STAR`. Truly
+unknown emoji still fall back to `DEFAULT`. To add a new hardware icon, add the
+8x8 frames to `Arduino/max7219_emoji_panel/emojis.h`, then add normalization
+rules in [`src/emoji_display/emoji.py`](src/emoji_display/emoji.py).
 
 ## Install
 
@@ -89,7 +92,6 @@ displayctl status
 displayctl supported
 displayctl normalize "😺"
 displayctl show "😺"
-displayctl sequence "🙂" "❤️" "🐶"
 displayctl clear --reason interrupt
 ```
 
@@ -104,7 +106,10 @@ Use `--token` the same way if the daemon was started with `--token` or
 `EMOJI_DISPLAY_TOKEN`.
 
 If `hold_ms` is omitted, the server uses its default `7000` ms.
-The Arduino firmware has its own standalone default `3000` ms, used only when
+When a new symbol arrives while another one is still fresh, the daemon keeps
+the current symbol for at most `1600` ms total, then replaces it with the latest
+incoming symbol. The Arduino firmware has its own standalone default `1600` ms,
+used only when
 the board receives `EMO <name>` without an explicit duration.
 
 ## HTTP API
@@ -149,14 +154,15 @@ The daemon sends `EMO CAT 7000` to Arduino after normalization.
     {"symbol": "🙂", "name": "slightly_smiling_face", "hold_ms": 7000},
     {"symbol": "❤️", "name": "red_heart", "hold_ms": 7000}
   ],
-  "mode": "queue",
+  "mode": "replace",
   "source": "listener",
   "id": "run-123:segment-4"
 }
 ```
 
-With the serial driver, `sequence` keeps the request open while it spaces
-Arduino commands by each item's `hold_ms`, so the panel displays them in order.
+`sequence` is accepted for compatibility, but it never queues display items.
+The daemon selects the last item in the request, ignores the rest, and reports
+`queue_size: 0`.
 
 `POST /v1/clear`
 
@@ -218,7 +224,7 @@ python Arduino/max7219_emoji_panel/test_all_emojis.py /dev/ttyACM0
       "timeout_s": 0.25,
       "mode": "replace",
       "source": "listener",
-      "send": "all",
+      "send": "last",
       "clear_on_interrupt": true
     }
   }

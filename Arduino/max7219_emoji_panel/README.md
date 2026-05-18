@@ -74,17 +74,17 @@ Examples:
 
 ```text
 EMO HAPPY 2000
-EMO HEART 3000 15
-EMO CAT 3000
+EMO HEART 1600 15
+EMO CAT 1600
 CLEAR
 LIST
-IMG 0x3C 0x42 0xA5 0x81 0xA5 0x99 0x42 0x3C 3000
+IMG 0x3C 0x42 0xA5 0x81 0xA5 0x99 0x42 0x3C 1600
 ```
 
 Responses used by the Python daemon:
 
 ```text
-OK EMO CAT 3000
+OK EMO CAT 1600
 OK CLEAR
 ERR: unknown EMO name. Try LIST.
 ```
@@ -98,7 +98,7 @@ main loop still reads Serial, so a new `EMO` replaces the current one and
 ```text
 HAPPY LAUGH WINK SURPRISE SAD CRY ANGRY LOVE KISS COOL SLEEP NEUTRAL
 CONFUSED THINK TONGUE DEAD WOW HEART YES NO OK ALERT MUSIC ROBOT GHOST
-CAT DOG FOOD STAR
+CAT DOG FOOD STAR CAR FLOWER RAIN DEFAULT
 ```
 
 Run `LIST` to get the same names with frame counts and FPS values.
@@ -166,8 +166,11 @@ const uint8_t MAX_ANIM_FRAMES = 4;
 const uint8_t DEFAULT_ANIM_FPS = 8;
 const uint8_t MIN_ANIM_FPS = 1;
 const uint8_t MAX_ANIM_FPS = 30;
-const uint16_t DEFAULT_SHOW_MS = 3000;
+const uint16_t DEFAULT_SHOW_MS = 1600;
+const int LDR_HYSTERESIS_ADC = 12;
 ```
 
 If the LDR works backward because your divider is reversed, swap the LDR and
 resistor positions or adjust `LDR_DARK_ADC` / `LDR_BRIGHT_ADC`.
+If brightness still chatters near one light level, increase
+`LDR_HYSTERESIS_ADC` a little, for example from `12` to `16` or `20`.

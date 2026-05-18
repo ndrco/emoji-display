@@ -74,7 +74,6 @@ class SerialDisplayDriver:
     """Driver for the Arduino MAX7219 panel serial protocol."""
 
     name = "serial"
-    host_timed_sequences = True
 
     def __init__(
         self,

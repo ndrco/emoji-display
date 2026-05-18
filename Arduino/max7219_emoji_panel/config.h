@@ -34,6 +34,10 @@ const uint8_t USER_MAX_INTENSITY_MAX = 15;
 const uint8_t LDR_EMA_DIV = 8;
 const int LDR_EMA_INITIAL = 500;
 
+// Extra ADC margin before switching to a neighboring brightness level.
+// This hysteresis reduces visible flicker near threshold values.
+const int LDR_HYSTERESIS_ADC = 20;
+
 // Animation timing.
 // Each built-in emoji has its own FPS in emojis.h. If an emoji entry has fps=0,
 // DEFAULT_ANIM_FPS is used.
@@ -41,7 +45,7 @@ const uint8_t MAX_ANIM_FRAMES = 4;
 const uint8_t DEFAULT_ANIM_FPS = 8;
 const uint8_t MIN_ANIM_FPS = 1;
 const uint8_t MAX_ANIM_FPS = 30;
-const uint16_t DEFAULT_SHOW_MS = 3000;
+const uint16_t DEFAULT_SHOW_MS = 1600;
 const uint16_t IMG_REFRESH_MS = 120;
 const uint16_t FADE_STEP_DELAY_MS = 35;
 

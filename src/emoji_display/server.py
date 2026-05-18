@@ -10,7 +10,7 @@ import time
 from dataclasses import dataclass, field
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any
+from typing import Any, Callable
 
 from .driver import DisplayDriver, DisplayItem, LoggingDisplayDriver, SerialDisplayDriver
 from .emoji import normalize_emoji, supported_catalog
@@ -23,6 +23,9 @@ class DisplayState:
     current: str | None = None
     display_name: str | None = None
     display_symbol: str | None = None
+    pending: str | None = None
+    pending_display_name: str | None = None
+    pending_display_symbol: str | None = None
     queue_size: int = 0
     last_error: str | None = None
     last_source: str | None = None
@@ -34,7 +37,16 @@ class DisplayState:
 class EmojiDisplayApp:
     driver: DisplayDriver = field(default_factory=LoggingDisplayDriver)
     state: DisplayState = field(default_factory=DisplayState)
+    interrupt_ms: int = 1600
+    clock: Callable[[], float] = time.monotonic
     lock: threading.RLock = field(default_factory=threading.RLock, repr=False)
+    _current_started_at: float | None = field(default=None, init=False, repr=False)
+    _current_until: float | None = field(default=None, init=False, repr=False)
+    _pending_item: DisplayItem | None = field(default=None, init=False, repr=False)
+    _pending_source: str | None = field(default=None, init=False, repr=False)
+    _pending_id: str | None = field(default=None, init=False, repr=False)
+    _pending_at: float | None = field(default=None, init=False, repr=False)
+    _pending_timer: threading.Timer | None = field(default=None, init=False, repr=False)
 
     def status(self) -> dict:
         with self.lock:
@@ -46,6 +58,9 @@ class EmojiDisplayApp:
                 "current": self.state.current,
                 "display_name": self.state.display_name,
                 "display_symbol": self.state.display_symbol,
+                "pending": self.state.pending,
+                "pending_display_name": self.state.pending_display_name,
+                "pending_display_symbol": self.state.pending_display_symbol,
                 "queue_size": self.state.queue_size,
                 "last_error": self.state.last_error or driver_status.get("last_error"),
                 "last_source": self.state.last_source,
@@ -59,16 +74,9 @@ class EmojiDisplayApp:
         with self.lock:
             item = _item_from_payload(payload)
             mode = _mode_from_payload(payload)
-            if mode == "replace":
-                self.state.queue_size = 0
-            self.driver.show(item)
-            self.state.current = item.symbol
-            self.state.display_name = item.display_name
-            self.state.display_symbol = item.display_symbol
-            self.state.last_source = _optional_text(payload.get("source"))
-            self.state.last_id = _optional_text(payload.get("id"))
-            self.state.last_reason = None
-            self.state.last_error = None
+            source = _optional_text(payload.get("source"))
+            event_id = _optional_text(payload.get("id"))
+            response = self._replace_or_defer(item, source=source, event_id=event_id)
             log.debug(
                 "show accepted symbol=%s display=%s mode=%s source=%s",
                 item.symbol,
@@ -76,12 +84,7 @@ class EmojiDisplayApp:
                 mode,
                 self.state.last_source,
             )
-            return {
-                "ok": True,
-                "current": self.state.current,
-                "display_name": self.state.display_name,
-                "display_symbol": self.state.display_symbol,
-            }
+            return response
 
     def sequence(self, payload: dict[str, Any]) -> dict:
         with self.lock:
@@ -89,57 +92,161 @@ class EmojiDisplayApp:
             if not isinstance(raw_items, list) or not raw_items:
                 raise ValueError("items must be a non-empty array")
             mode = _mode_from_payload(payload)
-            if mode == "replace":
-                self.state.queue_size = 0
-            else:
-                self.state.queue_size += max(0, len(raw_items) - 1)
-            last_item: DisplayItem | None = None
-            for index, raw_item in enumerate(raw_items):
-                if not isinstance(raw_item, dict):
-                    raise ValueError("each sequence item must be an object")
-                last_item = _item_from_payload(raw_item)
-                self.driver.show(last_item)
-                if (
-                    index < len(raw_items) - 1
-                    and getattr(self.driver, "host_timed_sequences", False)
-                    and last_item.hold_ms > 0
-                ):
-                    time.sleep(last_item.hold_ms / 1000.0)
-            self.state.queue_size = 0
-            self.state.current = last_item.symbol if last_item else None
-            self.state.display_name = last_item.display_name if last_item else None
-            self.state.display_symbol = last_item.display_symbol if last_item else None
-            self.state.last_source = _optional_text(payload.get("source"))
-            self.state.last_id = _optional_text(payload.get("id"))
-            self.state.last_reason = None
-            self.state.last_error = None
+
+            raw_item = raw_items[-1]
+            if not isinstance(raw_item, dict):
+                raise ValueError("last sequence item must be an object")
+
+            item = _item_from_payload(raw_item)
+            source = _optional_text(payload.get("source"))
+            event_id = _optional_text(payload.get("id"))
+            response = self._replace_or_defer(item, source=source, event_id=event_id)
             log.debug(
-                "sequence accepted count=%d mode=%s source=%s",
+                "sequence replaced current with last item count=%d mode=%s source=%s",
                 len(raw_items),
                 mode,
                 self.state.last_source,
             )
-            return {
-                "ok": True,
-                "current": self.state.current,
-                "display_name": self.state.display_name,
-                "display_symbol": self.state.display_symbol,
-                "accepted": len(raw_items),
-            }
+            response["accepted"] = 1
+            response["ignored"] = len(raw_items) - 1
+            response["selected"] = "last"
+            return response
 
     def clear(self, payload: dict[str, Any]) -> dict:
         with self.lock:
+            self._cancel_pending()
             self.driver.clear()
             self.state.current = None
             self.state.display_name = None
             self.state.display_symbol = None
+            self.state.pending = None
+            self.state.pending_display_name = None
+            self.state.pending_display_symbol = None
             self.state.queue_size = 0
             self.state.last_source = _optional_text(payload.get("source"))
             self.state.last_reason = _optional_text(payload.get("reason"))
             self.state.last_id = None
             self.state.last_error = None
+            self._current_started_at = None
+            self._current_until = None
             log.debug("clear accepted source=%s reason=%s", self.state.last_source, self.state.last_reason)
             return {"ok": True}
+
+    def _replace_or_defer(self, item: DisplayItem, *, source: str | None, event_id: str | None) -> dict:
+        now = self.clock()
+        wait_until = self._interrupt_wait_until(now)
+        if wait_until is not None:
+            self._set_pending(item, source=source, event_id=event_id, when=wait_until)
+            return {
+                "ok": True,
+                "current": self.state.current,
+                "display_name": self.state.display_name,
+                "display_symbol": self.state.display_symbol,
+                "pending": item.symbol,
+                "pending_display_name": item.display_name,
+                "pending_display_symbol": item.display_symbol,
+                "deferred_ms": max(0, int((wait_until - now) * 1000)),
+                "queue_size": 0,
+            }
+
+        self._cancel_pending()
+        self._apply_show(item, source=source, event_id=event_id, now=now)
+        return {
+            "ok": True,
+            "current": self.state.current,
+            "display_name": self.state.display_name,
+            "display_symbol": self.state.display_symbol,
+            "queue_size": 0,
+        }
+
+    def _interrupt_wait_until(self, now: float) -> float | None:
+        if self.interrupt_ms <= 0 or self._current_started_at is None or self._current_until is None:
+            return None
+        if now >= self._current_until:
+            return None
+        wait_until = min(self._current_started_at + self.interrupt_ms / 1000.0, self._current_until)
+        return wait_until if now < wait_until else None
+
+    def _set_pending(
+        self,
+        item: DisplayItem,
+        *,
+        source: str | None,
+        event_id: str | None,
+        when: float,
+    ) -> None:
+        self._pending_item = item
+        self._pending_source = source
+        self._pending_id = event_id
+        self._pending_at = when
+        self.state.pending = item.symbol
+        self.state.pending_display_name = item.display_name
+        self.state.pending_display_symbol = item.display_symbol
+        self.state.queue_size = 0
+        self.state.last_source = source
+        self.state.last_id = event_id
+        self.state.last_reason = None
+        self.state.last_error = None
+        self._schedule_pending(when)
+
+    def _schedule_pending(self, when: float) -> None:
+        self._cancel_pending_timer()
+        delay = max(0.0, when - self.clock())
+        self._pending_timer = threading.Timer(delay, self._flush_pending)
+        self._pending_timer.daemon = True
+        self._pending_timer.start()
+
+    def _flush_pending(self) -> None:
+        with self.lock:
+            if self._pending_item is None or self._pending_at is None:
+                return
+            now = self.clock()
+            if now < self._pending_at:
+                self._schedule_pending(self._pending_at)
+                return
+            item = self._pending_item
+            source = self._pending_source
+            event_id = self._pending_id
+            self._clear_pending_state()
+            try:
+                self._apply_show(item, source=source, event_id=event_id, now=now)
+            except Exception as exc:  # noqa: BLE001 - timer thread must not die noisily
+                self.state.last_error = str(exc)
+                log.exception("pending show failed")
+
+    def _apply_show(self, item: DisplayItem, *, source: str | None, event_id: str | None, now: float) -> None:
+        self.driver.show(item)
+        self.state.current = item.symbol
+        self.state.display_name = item.display_name
+        self.state.display_symbol = item.display_symbol
+        self.state.pending = None
+        self.state.pending_display_name = None
+        self.state.pending_display_symbol = None
+        self.state.queue_size = 0
+        self.state.last_source = source
+        self.state.last_id = event_id
+        self.state.last_reason = None
+        self.state.last_error = None
+        self._current_started_at = now
+        self._current_until = now + max(0, item.hold_ms) / 1000.0
+
+    def _cancel_pending(self) -> None:
+        self._cancel_pending_timer()
+        self._clear_pending_state()
+
+    def _cancel_pending_timer(self) -> None:
+        if self._pending_timer is not None:
+            self._pending_timer.cancel()
+            self._pending_timer = None
+
+    def _clear_pending_state(self) -> None:
+        self._pending_item = None
+        self._pending_source = None
+        self._pending_id = None
+        self._pending_at = None
+        self.state.pending = None
+        self.state.pending_display_name = None
+        self.state.pending_display_symbol = None
 
 
 class EmojiDisplayServer(ThreadingHTTPServer):
@@ -260,6 +367,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=float(os.getenv("EMOJI_DISPLAY_ACK_TIMEOUT", "1.0")),
     )
     parser.add_argument(
+        "--interrupt-ms",
+        type=int,
+        default=int(os.getenv("EMOJI_DISPLAY_INTERRUPT_MS", "1600")),
+        help="minimum time to keep the current symbol before replacing it",
+    )
+    parser.add_argument(
         "--no-serial-ack",
         action="store_true",
         default=os.getenv("EMOJI_DISPLAY_NO_SERIAL_ACK", "").lower() in {"1", "true", "yes"},
@@ -274,7 +387,7 @@ def main(argv: list[str] | None = None) -> int:
         level=getattr(logging, str(args.log_level).upper(), logging.INFO),
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
-    app = EmojiDisplayApp(driver=_driver_from_args(args))
+    app = EmojiDisplayApp(driver=_driver_from_args(args), interrupt_ms=args.interrupt_ms)
     server = EmojiDisplayServer((args.host, args.port), app, token=args.token)
     log.info(
         "emoji-display listening on http://%s:%d using %s driver",

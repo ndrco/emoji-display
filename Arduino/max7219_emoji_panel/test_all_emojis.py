@@ -105,7 +105,7 @@ def main():
     parser.add_argument(
         "-d", "--duration",
         type=int,
-        default=3000,
+        default=1600,
         help="Сколько миллисекунд показывать каждый эмодзи"
     )
 

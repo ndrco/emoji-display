@@ -37,7 +37,7 @@ def build_parser() -> argparse.ArgumentParser:
     sequence = sub.add_parser("sequence")
     sequence.add_argument("symbols", nargs="+")
     sequence.add_argument("--hold-ms", type=int, default=None)
-    sequence.add_argument("--mode", choices=["replace", "queue"], default="queue")
+    sequence.add_argument("--mode", choices=["replace", "queue"], default="replace")
     sequence.add_argument("--source", default="displayctl")
     sequence.add_argument("--id", default=None)
 

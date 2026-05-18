@@ -4,9 +4,9 @@
  * Display: one MAX7219 8x8 LED matrix module
  *
  * Commands over Serial @115200:
- *   EMO <name> [ms] [fps]   Example: EMO HAPPY 3000
- *                            Example with temporary FPS override: EMO HEART 3000 15
- *   IMG <b0> ... <b7> [ms]  Example: IMG 0x3C 0x42 0xA5 0x81 0xA5 0x99 0x42 0x3C 3000
+ *   EMO <name> [ms] [fps]   Example: EMO HAPPY 1600
+ *                            Example with temporary FPS override: EMO HEART 1600 15
+ *   IMG <b0> ... <b7> [ms]  Example: IMG 0x3C 0x42 0xA5 0x81 0xA5 0x99 0x42 0x3C 1600
  *   LIST
  *   CLEAR
  *   DEBUG 1 / DEBUG 0
@@ -54,6 +54,7 @@ int lastRawLdr = 0;
 int lastPot = 0;
 uint8_t lastBaseIntensity = 0;
 uint8_t lastIntensity = 0;
+bool baseIntensityInitialized = false;
 bool debugEnabled = false;
 unsigned long lastDebugPrintMs = 0;
 
@@ -221,6 +222,58 @@ uint8_t baseIntensityFromAdc(int adc)
   return pgm_read_byte(&BRIGHTNESS_LUT[idx]);
 }
 
+int adcForLutIndex(int idx)
+{
+  if (idx < 0) idx = 0;
+  if (idx > 63) idx = 63;
+  return (int)mapLong(idx, 0, 63, LDR_DARK_ADC, LDR_BRIGHT_ADC);
+}
+
+int lowerAdcForIntensity(uint8_t intensity)
+{
+  for (int idx = 0; idx < 64; idx++) {
+    uint8_t level = pgm_read_byte(&BRIGHTNESS_LUT[idx]);
+    if (level >= intensity) {
+      return adcForLutIndex(idx);
+    }
+  }
+
+  return LDR_BRIGHT_ADC;
+}
+
+int upperAdcForIntensity(uint8_t intensity)
+{
+  for (int idx = 63; idx >= 0; idx--) {
+    uint8_t level = pgm_read_byte(&BRIGHTNESS_LUT[idx]);
+    if (level <= intensity) {
+      return adcForLutIndex(idx);
+    }
+  }
+
+  return LDR_DARK_ADC;
+}
+
+uint8_t baseIntensityWithHysteresis(int adc, uint8_t targetIntensity)
+{
+  if (!baseIntensityInitialized) {
+    baseIntensityInitialized = true;
+    return targetIntensity;
+  }
+
+  uint8_t current = lastBaseIntensity;
+  if (targetIntensity == current) return current;
+
+  if (targetIntensity > current && current < MAX_INTENSITY) {
+    int riseAdc = lowerAdcForIntensity(current + 1) + LDR_HYSTERESIS_ADC;
+    if (adc < riseAdc) return current;
+  } else if (targetIntensity < current && current > MIN_INTENSITY) {
+    int fallAdc = upperAdcForIntensity(current - 1) - LDR_HYSTERESIS_ADC;
+    if (adc > fallAdc) return current;
+  }
+
+  return targetIntensity;
+}
+
 uint8_t applyPotLimit(uint8_t baseIntensity)
 {
   lastPot = analogRead(POT_PIN);
@@ -243,7 +296,8 @@ uint8_t readAutoIntensity()
   // Integer exponential moving average. No float math on small AVR boards.
   ldrEMA = ((long)ldrEMA * (LDR_EMA_DIV - 1) + lastRawLdr) / LDR_EMA_DIV;
 
-  lastBaseIntensity = baseIntensityFromAdc(ldrEMA);
+  uint8_t targetBaseIntensity = baseIntensityFromAdc(ldrEMA);
+  lastBaseIntensity = baseIntensityWithHysteresis(ldrEMA, targetBaseIntensity);
   lastIntensity = applyPotLimit(lastBaseIntensity);
   return lastIntensity;
 }
@@ -427,9 +481,9 @@ void printHelp()
   Serial.println(F("  CLEAR"));
   Serial.println(F("  DEBUG 1"));
   Serial.println(F("Examples:"));
-  Serial.println(F("  EMO HAPPY 3000"));
-  Serial.println(F("  EMO HEART 3000 15"));
-  Serial.println(F("  IMG 0x3C 0x42 0xA5 0x81 0xA5 0x99 0x42 0x3C 3000"));
+  Serial.println(F("  EMO HAPPY 1600"));
+  Serial.println(F("  EMO HEART 1600 15"));
+  Serial.println(F("  IMG 0x3C 0x42 0xA5 0x81 0xA5 0x99 0x42 0x3C 1600"));
 }
 
 void handleEmoCommand(char **argv, uint8_t argc)

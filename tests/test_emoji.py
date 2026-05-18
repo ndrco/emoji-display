@@ -25,10 +25,31 @@ def test_common_status_symbols_are_supported():
 def test_star_variants_map_to_star():
     assert normalize_emoji("🌟").display_name == "STAR"
     assert normalize_emoji("✨").display_name == "STAR"
+    assert normalize_emoji("🎆").display_name == "STAR"
 
 
-def test_unknown_emoji_falls_back_to_neutral():
-    match = normalize_emoji("🛸")
+def test_domain_emoji_collapse_to_hardware_categories():
+    assert normalize_emoji("🛸").display_name == "CAR"
+    assert normalize_emoji("🚀").display_name == "CAR"
+    assert normalize_emoji("🌸").display_name == "FLOWER"
+    assert normalize_emoji("🌱").display_name == "FLOWER"
+    assert normalize_emoji("☔").display_name == "RAIN"
+    assert normalize_emoji("🌧️").display_name == "RAIN"
+    assert normalize_emoji("☕").display_name == "FOOD"
+    assert normalize_emoji("🎸").display_name == "MUSIC"
 
-    assert match.display_name == "NEUTRAL"
-    assert match.matched_by == "fallback"
+
+def test_domain_emoji_names_collapse_to_hardware_categories():
+    assert normalize_emoji("", "rocket").display_name == "CAR"
+    assert normalize_emoji("", "potted plant").display_name == "FLOWER"
+    assert normalize_emoji("", "umbrella with rain drops").display_name == "RAIN"
+    assert normalize_emoji("", "fireworks").display_name == "STAR"
+    assert normalize_emoji("", "musical instrument").display_name == "MUSIC"
+    assert normalize_emoji("", "hot beverage").display_name == "FOOD"
+
+
+def test_unknown_emoji_still_falls_back_to_default():
+    unknown = normalize_emoji("🧿")
+
+    assert unknown.display_name == "DEFAULT"
+    assert unknown.matched_by == "fallback"
