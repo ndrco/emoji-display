@@ -8,6 +8,9 @@ After flashing the board, return to the repository root
 [`README.md`](../../README.md) for daemon installation, service setup, and
 verification steps.
 
+If you want a printable enclosure for the hardware, see
+[`../Case 3d model`](../Case%203d%20model).
+
 ## Components
 
 - Arduino Pro Micro / Leonardo-compatible ATmega32U4 board, 5 V version.
@@ -20,9 +23,26 @@ verification steps.
 Other Arduino boards can work too. If you use Uno, Nano, ESP32, or another
 pinout, update `PIN_DIN`, `PIN_CLK`, and `PIN_CS` in `config.h`.
 
+## Enclosure
+
+3D-printable enclosure files are stored in
+[`../Case 3d model`](../Case%203d%20model):
+
+- `Top.stl`
+- `Bottom.stl`
+- `Display.stl`
+- `Glass.stl`
+- `Knob.stl`
+
+That folder also contains one render image, one assembled-device photo, and one
+short demo video for reference during printing and assembly.
+
 ## Wiring
 
 The default pinout is for the current Pro Micro build:
+
+A wiring snapshot is also available as
+[`Schematic.png`](Schematic.png).
 
 | Module | Arduino |
 | --- | --- |
@@ -59,6 +79,11 @@ brightness so the display can be dimmed for a dark room.
 4. Check pins and brightness calibration in `config.h`.
 5. Upload the sketch.
 6. Open Serial Monitor at `115200` baud with line ending `Newline`.
+
+After power-up, the panel plays a short welcome splash once before it starts
+accepting normal display commands. You can tune or disable this in `config.h`
+with `STARTUP_SPLASH_ENABLED`, `STARTUP_SPLASH_FRAME_MS`, and
+`STARTUP_SPLASH_HOLD_MS`.
 
 ## Serial Protocol
 
@@ -166,15 +191,37 @@ the new display name.
 Main settings are in `config.h`:
 
 ```cpp
+const int LDR_DARK_ADC = 90;
+const int LDR_BRIGHT_ADC = 760;
+const uint8_t BRIGHTNESS_CURVE_PROFILE = 0;
 const uint8_t MAX_ANIM_FRAMES = 4;
 const uint8_t DEFAULT_ANIM_FPS = 8;
 const uint8_t MIN_ANIM_FPS = 1;
 const uint8_t MAX_ANIM_FPS = 30;
 const uint16_t DEFAULT_SHOW_MS = 1600;
-const int LDR_HYSTERESIS_ADC = 12;
+const int LDR_HYSTERESIS_ADC = 20;
 ```
 
 If the LDR works backward because your divider is reversed, swap the LDR and
 resistor positions or adjust `LDR_DARK_ADC` / `LDR_BRIGHT_ADC`.
 If brightness still chatters near one light level, increase
-`LDR_HYSTERESIS_ADC` a little, for example from `12` to `16` or `20`.
+`LDR_HYSTERESIS_ADC` a little, for example from `20` to `24` or `28`.
+
+If the display becomes dim too quickly while room light falls, change
+`BRIGHTNESS_CURVE_PROFILE`:
+
+1. `0` = soft, keeps mid/low light levels brighter for longer.
+2. `1` = balanced.
+3. `2` = steep, darkens quickly.
+
+If the LDR is mounted behind tinted glass or smoked acrylic, the ADC range
+usually shifts downward a lot. In that case:
+
+1. Send `DEBUG 1` in Serial Monitor.
+2. Note `LDR raw=` in the darkest realistic condition.
+3. Note `LDR raw=` in the brightest realistic condition.
+4. Set `LDR_DARK_ADC` slightly below the dark reading.
+5. Set `LDR_BRIGHT_ADC` slightly below or near the bright reading.
+
+Example: if you see `raw=110` in the dark and `raw=720` in bright room light,
+good starting values are `LDR_DARK_ADC = 90` and `LDR_BRIGHT_ADC = 760`.

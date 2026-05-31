@@ -17,14 +17,21 @@
 #define LDR_PIN A0
 #define POT_PIN A1
 
-// Measured values for your LDR divider:
-// bright: 1000..1015, normal room: 650..850, dark: 220..350
-const int LDR_DARK_ADC   = 300;
-const int LDR_BRIGHT_ADC = 1010;
+// Measured values for the current LDR divider behind tinted glass:
+// bright room/daylight: about 650..780, normal room: 300..550, dark: 80..180
+// If the panel still reacts too weakly, lower LDR_BRIGHT_ADC a bit more.
+const int LDR_DARK_ADC   = 10;
+const int LDR_BRIGHT_ADC = 700;
 
 // MAX7219 intensity range. 0 is minimum brightness, not complete shutdown.
 const uint8_t MIN_INTENSITY = 0;
 const uint8_t MAX_INTENSITY = 15;
+
+// Brightness curve profile for LDR -> MAX7219 intensity mapping.
+// 0 = soft, keeps the display brighter longer while ambient light falls
+// 1 = balanced
+// 2 = steep, darkens faster
+const uint8_t BRIGHTNESS_CURVE_PROFILE = 1;
 
 // Potentiometer limits the maximum display brightness to this range.
 const uint8_t USER_MAX_INTENSITY_MIN = 3;
@@ -48,6 +55,9 @@ const uint8_t MAX_ANIM_FPS = 30;
 const uint16_t DEFAULT_SHOW_MS = 1600;
 const uint16_t IMG_REFRESH_MS = 120;
 const uint16_t FADE_STEP_DELAY_MS = 35;
+const bool STARTUP_SPLASH_ENABLED = true;
+const uint16_t STARTUP_SPLASH_FRAME_MS = 220;
+const uint16_t STARTUP_SPLASH_HOLD_MS = 450;
 
 // Serial
 const uint32_t SERIAL_BAUD = 115200;

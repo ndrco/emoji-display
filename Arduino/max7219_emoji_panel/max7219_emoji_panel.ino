@@ -33,9 +33,32 @@
 
 LedControl lc(PIN_DIN, PIN_CLK, PIN_CS, MATRIX_COUNT);
 
-// Gamma-like brightness curve for gamma ~= 2.8, 64 samples, output 0..15.
-// This saves Flash compared to pow() and behaves predictably on AVR.
-const uint8_t BRIGHTNESS_LUT[64] PROGMEM = {
+// Brightness LUTs for LDR -> MAX7219 intensity mapping.
+// Using PROGMEM LUTs keeps the behavior deterministic on AVR and makes
+// curve tuning easier than runtime pow()/float math.
+const uint8_t BRIGHTNESS_LUT_SOFT[64] PROGMEM = {
+  0, 0, 0, 0, 0, 0, 1, 1,
+  1, 1, 1, 1, 2, 2, 2, 2,
+  2, 2, 3, 3, 3, 3, 4, 4,
+  4, 4, 5, 5, 5, 6, 6, 6,
+  7, 7, 7, 8, 8, 8, 9, 9,
+  9,10,10,10,11,11,11,12,
+ 12,12,13,13,13,14,14,14,
+ 15,15,15,15,15,15,15,15
+};
+
+const uint8_t BRIGHTNESS_LUT_BALANCED[64] PROGMEM = {
+  0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 1, 1, 1, 1, 1,
+  1, 1, 1, 2, 2, 2, 2, 2,
+  2, 3, 3, 3, 3, 4, 4, 4,
+  4, 5, 5, 5, 6, 6, 6, 7,
+  7, 7, 8, 8, 9, 9, 9,10,
+ 10,10,11,11,12,12,13,13,
+ 13,14,14,15,15,15,15,15
+};
+
+const uint8_t BRIGHTNESS_LUT_STEEP[64] PROGMEM = {
   0, 0, 0, 0, 0, 0, 0, 0,
   0, 0, 0, 0, 0, 0, 0, 0,
   0, 0, 0, 1, 1, 1, 1, 1,
@@ -72,6 +95,21 @@ uint16_t activeFrameDelayMs = IMG_REFRESH_MS;
 uint32_t activeUntilMs = 0;
 uint32_t nextFrameMs = 0;
 uint8_t activeImage[8];
+
+const uint8_t SPLASH_HEART_SMALL[8] PROGMEM = {
+  0b00000000, 0b00100100, 0b01111110, 0b11111111,
+  0b11111111, 0b01111110, 0b00111100, 0b00011000
+};
+
+const uint8_t SPLASH_HEART_BIG[8] PROGMEM = {
+  0b01100110, 0b11111111, 0b11111111, 0b11111111,
+  0b01111110, 0b00111100, 0b00011000, 0b00000000
+};
+
+const uint8_t SPLASH_SMILE[8] PROGMEM = {
+  0b00111100, 0b01000010, 0b10100101, 0b10000001,
+  0b10100101, 0b10011001, 0b01000010, 0b00111100
+};
 
 // -------------------- Small helpers --------------------
 
@@ -111,6 +149,13 @@ long mapLong(long x, long inMin, long inMax, long outMin, long outMax)
 {
   if (inMax == inMin) return outMin;
   return (x - inMin) * (outMax - outMin) / (inMax - inMin) + outMin;
+}
+
+const uint8_t *activeBrightnessLut()
+{
+  if (BRIGHTNESS_CURVE_PROFILE == 0) return BRIGHTNESS_LUT_SOFT;
+  if (BRIGHTNESS_CURVE_PROFILE == 1) return BRIGHTNESS_LUT_BALANCED;
+  return BRIGHTNESS_LUT_STEEP;
 }
 
 void printProgmemString(PGM_P p)
@@ -212,6 +257,8 @@ bool readSerialLine()
 
 uint8_t baseIntensityFromAdc(int adc)
 {
+  const uint8_t *lut = activeBrightnessLut();
+
   if (adc < LDR_DARK_ADC) adc = LDR_DARK_ADC;
   if (adc > LDR_BRIGHT_ADC) adc = LDR_BRIGHT_ADC;
 
@@ -219,7 +266,7 @@ uint8_t baseIntensityFromAdc(int adc)
   if (idx < 0) idx = 0;
   if (idx > 63) idx = 63;
 
-  return pgm_read_byte(&BRIGHTNESS_LUT[idx]);
+  return pgm_read_byte(lut + idx);
 }
 
 int adcForLutIndex(int idx)
@@ -231,8 +278,10 @@ int adcForLutIndex(int idx)
 
 int lowerAdcForIntensity(uint8_t intensity)
 {
+  const uint8_t *lut = activeBrightnessLut();
+
   for (int idx = 0; idx < 64; idx++) {
-    uint8_t level = pgm_read_byte(&BRIGHTNESS_LUT[idx]);
+    uint8_t level = pgm_read_byte(lut + idx);
     if (level >= intensity) {
       return adcForLutIndex(idx);
     }
@@ -243,8 +292,10 @@ int lowerAdcForIntensity(uint8_t intensity)
 
 int upperAdcForIntensity(uint8_t intensity)
 {
+  const uint8_t *lut = activeBrightnessLut();
+
   for (int idx = 63; idx >= 0; idx--) {
-    uint8_t level = pgm_read_byte(&BRIGHTNESS_LUT[idx]);
+    uint8_t level = pgm_read_byte(lut + idx);
     if (level <= intensity) {
       return adcForLutIndex(idx);
     }
@@ -353,6 +404,26 @@ void fadeOutFrom(uint8_t startIntensity)
     delay(FADE_STEP_DELAY_MS);
   }
   lc.clearDisplay(0);
+}
+
+void playStartupSplash()
+{
+  if (!STARTUP_SPLASH_ENABLED) return;
+
+  const uint8_t *const frames[] = {
+    SPLASH_HEART_SMALL,
+    SPLASH_HEART_BIG,
+    SPLASH_SMILE
+  };
+
+  for (uint8_t i = 0; i < 3; i++) {
+    drawFrame_P(frames[i], 0);
+    applyAutoBrightness();
+    delay(STARTUP_SPLASH_FRAME_MS);
+  }
+
+  delay(STARTUP_SPLASH_HOLD_MS);
+  fadeOutFrom(readAutoIntensity());
 }
 
 // -------------------- Emoji registry --------------------
@@ -613,6 +684,7 @@ void setup()
   lc.shutdown(0, false);
   lc.setIntensity(0, 8);
   lc.clearDisplay(0);
+  playStartupSplash();
 
   Serial.println(F("MAX7219 8x8 Emoji Panel ready."));
   printHelp();
