@@ -8,6 +8,9 @@ The bundled firmware lives in
 [`Arduino/max7219_emoji_panel`](Arduino/max7219_emoji_panel). Flash the Arduino
 first, then come back here to install the daemon.
 
+Files for the printable enclosure live in
+[`Arduino/Case 3d model`](Arduino/Case%203d%20model).
+
 ## What You Get
 
 - A local HTTP daemon for showing emoji on the panel.
@@ -362,6 +365,23 @@ That document covers:
 - the serial protocol
 - manual hardware testing
 - tuning brightness and animation timing
+
+## Enclosure Files
+
+Printable case assets live in
+[`Arduino/Case 3d model`](Arduino/Case%203d%20model):
+
+- `Top.stl`
+- `Bottom.stl`
+- `Display.stl`
+- `Glass.stl`
+- `Knob.stl`
+
+The folder also includes:
+
+- `Smileficator v18.png` as a render/preview
+- `photo_2026-05-31_19-20-57.jpg` as a real build photo
+- `video_2026-05-31_19-21-24.mp4` as a short demo clip
 
 ## Development
 

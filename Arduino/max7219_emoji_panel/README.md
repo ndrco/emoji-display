@@ -8,6 +8,9 @@ After flashing the board, return to the repository root
 [`README.md`](../../README.md) for daemon installation, service setup, and
 verification steps.
 
+If you want a printable enclosure for the hardware, see
+[`../Case 3d model`](../Case%203d%20model).
+
 ## Components
 
 - Arduino Pro Micro / Leonardo-compatible ATmega32U4 board, 5 V version.
@@ -20,9 +23,26 @@ verification steps.
 Other Arduino boards can work too. If you use Uno, Nano, ESP32, or another
 pinout, update `PIN_DIN`, `PIN_CLK`, and `PIN_CS` in `config.h`.
 
+## Enclosure
+
+3D-printable enclosure files are stored in
+[`../Case 3d model`](../Case%203d%20model):
+
+- `Top.stl`
+- `Bottom.stl`
+- `Display.stl`
+- `Glass.stl`
+- `Knob.stl`
+
+That folder also contains one render image, one assembled-device photo, and one
+short demo video for reference during printing and assembly.
+
 ## Wiring
 
 The default pinout is for the current Pro Micro build:
+
+A wiring snapshot is also available as
+[`Schematic.png`](Schematic.png).
 
 | Module | Arduino |
 | --- | --- |
